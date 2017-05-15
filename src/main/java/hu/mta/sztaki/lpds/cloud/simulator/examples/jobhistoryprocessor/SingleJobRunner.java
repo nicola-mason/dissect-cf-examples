@@ -18,7 +18,6 @@
  *  You should have received a copy of the GNU General Public License along
  *  with DISSECT-CF Examples.  If not, see <http://www.gnu.org/licenses/>.
  *  
- *  (C) Copyright 2016, Gabor Kecskemeti (g.kecskemeti@ljmu.ac.uk)
  *  (C) Copyright 2015, Gabor Kecskemeti (kecskemeti.gabor@sztaki.mta.hu)
  */
 package hu.mta.sztaki.lpds.cloud.simulator.examples.jobhistoryprocessor;
@@ -81,16 +80,13 @@ public class SingleJobRunner implements VirtualMachine.StateChange, ConsumptionE
 				// Mark that we start the job / no further queuing
 				toProcess.started();
 				try {
-					// vmset could get null if the compute task is rapidly
-					// terminating!
-					for (int i = 0; vmSet != null && i < vmSet.length; i++) {
+					// vmset could get null if the compute task is rapidly terminating!
+					for (int i = 0; vmSet!=null && i < vmSet.length; i++) {
 						// run the job's relevant part in the VM
-						final double cpuUtilisation = toProcess.perProcCPUTime * toProcess.nprocs
-								/ toProcess.getExectimeSecs();
 						vmSet[i].newComputeTask(
 								toProcess.getExectimeSecs()
-										* vmSet[i].getResourceAllocation().allocated.getTotalProcessingPower() * cpuUtilisation,
-								vmSet[i].getPerTickProcessingPower() * cpuUtilisation, this);
+										* vmSet[i].getResourceAllocation().allocated.getRequiredCPUs(),
+								ResourceConsumption.unlimitedProcessing, this);
 					}
 				} catch (Exception e) {
 					System.err.println(
