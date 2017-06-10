@@ -263,68 +263,76 @@ public class MultiIaaSJobDispatcher extends Timed {
 				// are uniform...
 				final int requestedClouds = (int) Math.ceil(requestedTotalInstances > maxIaaSmachines
 						? (double) requestedTotalInstances / maxIaaSmachines : 1);
-				final int uniformSpread = requestedTotalInstances / requestedClouds;
-				int remainder = requestedTotalInstances % requestedClouds;
-				int vmpointer = 0;
-				VirtualMachine[] vms = new VirtualMachine[requestedTotalInstances];
-				int[] targetIndexes = new int[requestedTotalInstances];
+				if (requestedClouds <= target.size()) {
 
-				for (int j = 0; j < requestedClouds; j++) {
-					final int expectedSpread = uniformSpread + remainder;
-					final int currentRequestSize = (int) Math.min(maxIaaSmachines, expectedSpread);
-					remainder = expectedSpread - currentRequestSize;
-					// Starting the VMs for the job
-					try {
-						final VirtualMachine[] vmsTemp = target.get(targetIndex)
-								.requestVM(
-										va, new ConstantConstraints(requestedprocs, useThisProcPower,
-												isMinimumProcPower, 512000000),
-										repo.get(targetIndex), currentRequestSize);
-						System.arraycopy(vmsTemp, 0, vms, vmpointer, vmsTemp.length);
-						for (int k = vmpointer + vmsTemp.length - 1; k >= vmpointer; k--) {
-							targetIndexes[k] = targetIndex;
-						}
-						vmpointer += vmsTemp.length;
+					final int uniformSpread = requestedTotalInstances / requestedClouds;
+					int remainder = requestedTotalInstances % requestedClouds;
+					int vmpointer = 0;
+					VirtualMachine[] vms = new VirtualMachine[requestedTotalInstances];
+					int[] targetIndexes = new int[requestedTotalInstances];
 
-						// doing a round robin scheduling for the target
-						// infrastructures
-						targetIndex++;
-						if (targetIndex == target.size()) {
-							targetIndex = 0;
+					for (int j = 0; j < requestedClouds; j++) {
+						final int expectedSpread = uniformSpread + remainder;
+						final int currentRequestSize = (int) Math.min(maxIaaSmachines, expectedSpread);
+						remainder = expectedSpread - currentRequestSize;
+						// Starting the VMs for the job
+						try {
+							final VirtualMachine[] vmsTemp = target.get(targetIndex)
+									.requestVM(va,
+											new ConstantConstraints(requestedprocs, useThisProcPower,
+													isMinimumProcPower, 512000000),
+											repo.get(targetIndex), currentRequestSize);
+							System.arraycopy(vmsTemp, 0, vms, vmpointer, vmsTemp.length);
+							for (int k = vmpointer + vmsTemp.length - 1; k >= vmpointer; k--) {
+								targetIndexes[k] = targetIndex;
+							}
+							vmpointer += vmsTemp.length;
+
+							// doing a round robin scheduling for the target
+							// infrastructures
+							targetIndex++;
+							if (targetIndex == target.size()) {
+								targetIndex = 0;
+							}
+						} catch (VMManager.VMManagementException e) {
+							// VM cannot be served because of too large resource
+							// request
+							if (verbosity) {
+								System.err.println("The oversized job's id: " + toprocess.getId() + " idx: " + i);
+							}
+							ignorecounter++;
+						} catch (Exception e) {
+							System.err.println("Unknown VM creation error: " + e.getMessage());
+							e.printStackTrace();
+							ignorecounter++;
 						}
-					} catch (VMManager.VMManagementException e) {
-						// VM cannot be served because of too large resource
-						// request
-						if (verbosity) {
-							System.err.println("The oversized job's id: " + toprocess.getId() + " idx: " + i);
-						}
-						ignorecounter++;
-					} catch (Exception e) {
-						System.err.println("Unknown VM creation error: " + e.getMessage());
-						e.printStackTrace();
-						ignorecounter++;
 					}
-				}
-				boolean servability = true;
-				for (int j = 0; j < vms.length && servability; j++) {
-					// check if the job was not servable because it would have
-					// needed more resources than the target clouds could offer
-					// in total.
-					servability &= !vms[j].getState().equals(VirtualMachine.State.NONSERVABLE);
-				}
-				if (servability) {
-					new SingleJobRunner(toprocess, vms, this);
-				} else {
-					for (int j = 0; j < vms.length; j++) {
-						if (!vms[j].getState().equals(VirtualMachine.State.NONSERVABLE)) {
-							try {
-								target.get(targetIndexes[j]).terminateVM(vms[j], true);
-							} catch (VMManager.NoSuchVMException e) {
-								// ignore
-							} catch (VMManagementException e) {
-								// ignore 2
+					boolean servability = true;
+					for (int j = 0; j < vms.length && servability; j++) {
+						// check if the job was not servable because it would
+						// have needed more resources than the target clouds
+						// could offer in total.
+						servability &= !vms[j].getState().equals(VirtualMachine.State.NONSERVABLE);
+					}
+					if (servability) {
+						new SingleJobRunner(toprocess, vms, this);
+					} else {
+						for (int j = 0; j < vms.length; j++) {
+							if (!vms[j].getState().equals(VirtualMachine.State.NONSERVABLE)) {
+								try {
+									target.get(targetIndexes[j]).terminateVM(vms[j], true);
+								} catch (VMManager.NoSuchVMException e) {
+									// ignore
+								} catch (VMManagementException e) {
+									// ignore 2
+								}
 							}
 						}
+						ignorecounter++;
+					}
+				} else {
+					if (verbosity) {
+						System.err.println("Bigger job than all clouds. Job id: " + toprocess.getId() + " idx: " + i);
 					}
 					ignorecounter++;
 				}
