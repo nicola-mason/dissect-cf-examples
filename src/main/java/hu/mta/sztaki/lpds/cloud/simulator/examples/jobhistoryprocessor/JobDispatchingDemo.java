@@ -25,6 +25,7 @@
 package hu.mta.sztaki.lpds.cloud.simulator.examples.jobhistoryprocessor;
 
 import java.io.File;
+import java.lang.reflect.Constructor;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.EnumMap;
@@ -40,6 +41,8 @@ import hu.mta.sztaki.lpds.cloud.simulator.helpers.trace.filters.RunningAtaGivenT
 import hu.mta.sztaki.lpds.cloud.simulator.helpers.trace.random.RepetitiveRandomTraceGenerator;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.IaaSService;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.PhysicalMachine;
+import hu.mta.sztaki.lpds.cloud.simulator.iaas.consolidation.Consolidator;
+import hu.mta.sztaki.lpds.cloud.simulator.iaas.consolidation.SimpleConsolidator;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.pmscheduling.PhysicalMachineController;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.pmscheduling.SchedulingDependentMachines;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.vmscheduling.FirstFitScheduler;
@@ -116,7 +119,32 @@ public class JobDispatchingDemo {
 			System.out.println(
 					"4. energy monitoring polling frequency (only needed when the second parameter does not start with +)");
 			System.out.println("4 - example) 5000");
+			System.out.println();
+			System.out.println("Supported system properties:");
+			System.out.println("hu.mta.sztaki.lpds.cloud.simulator.examples.consolidator");
+			System.out.println(
+					"\tThe consolidator class to be used for all clouds, if an unknown class is listed here we fall back to SimpleConsolidator");
+			System.out.println("hu.mta.sztaki.lpds.cloud.simulator.examples.consolidator.freq");
+			System.out.println("\tThe consolidator frequency to be used for all clouds");
+			System.out.println("hu.mta.sztaki.lpds.cloud.simulator.examples.verbosity");
+			System.out.println("\tTurn on additional logging information");
 			System.exit(0);
+		}
+
+		String consolidatorClass = System.getProperty("hu.mta.sztaki.lpds.cloud.simulator.examples.consolidator");
+		Class<? extends Consolidator> consolidator = null;
+		if (consolidatorClass != null) {
+			try {
+				@SuppressWarnings("rawtypes")
+				Class trial = Class.forName(consolidatorClass);
+				if (Scheduler.class.isAssignableFrom(trial)) {
+					consolidator = trial;
+				} else {
+					consolidator = SimpleConsolidator.class;
+				}
+			} catch (Exception e) {
+				consolidator = SimpleConsolidator.class;
+			}
 		}
 
 		// The preparation of the clouds
@@ -276,6 +304,21 @@ public class JobDispatchingDemo {
 		if (args.length > (doMonitoring ? 4 : 3)) {
 			Thread.sleep(50000);
 		}
+		ArrayList<Consolidator> consolidators = new ArrayList<Consolidator>();
+		if (consolidator != null) {
+			String consFreq = System.getProperty("hu.mta.sztaki.lpds.cloud.simulator.examples.consolidation.freq");
+			int freq = 5 * 60 * 1000;
+			if (consFreq != null) {
+				freq = Integer.parseInt(consFreq);
+			}
+			System.err.println(
+					"Consolidation is switched on using class " + consolidator.getName() + " with freq " + freq);
+			for (IaaSService iaas : iaasList) {
+				Constructor<? extends Consolidator> constructor = consolidator.getConstructor(IaaSService.class,
+						long.class);
+				consolidators.add(constructor.newInstance(iaas, freq));
+			}
+		}
 		long beforeSimu = Calendar.getInstance().getTimeInMillis();
 		System.err.println(
 				"Job dispatcher (with " + dispatcher.jobs.length + " jobs)  is completely prepared at " + beforeSimu);
@@ -310,6 +353,9 @@ public class JobDispatchingDemo {
 		System.err.println("Simulated timespan: " + (Timed.getFireCount() - dispatcher.getMinsubmittime() * 1000));
 		System.err.println("Final number of: Ignored jobs - " + dispatcher.getIgnorecounter() + " Destroyed VMs - "
 				+ dispatcher.getDestroycounter());
+		if (consolidator != null) {
+			System.err.println("Total migrations done: " + SimpleConsolidator.migrationCount);
+		}
 		long vmcount = 0;
 		for (IaaSService lociaas : iaasList) {
 			for (PhysicalMachine pm : lociaas.machines) {
