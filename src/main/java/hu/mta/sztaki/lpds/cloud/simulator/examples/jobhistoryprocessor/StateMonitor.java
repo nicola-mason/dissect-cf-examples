@@ -18,15 +18,11 @@
  *  You should have received a copy of the GNU General Public License along
  *  with DISSECT-CF Examples.  If not, see <http://www.gnu.org/licenses/>.
  *  
+ *  (C) Copyright 2017, Gabor Kecskemeti (g.kecskemeti@ljmu.ac.uk)
  *  (C) Copyright 2013-15, Gabor Kecskemeti (gkecskem@dps.uibk.ac.at,
  *   									  kecskemeti.gabor@sztaki.mta.hu)
  */
 package hu.mta.sztaki.lpds.cloud.simulator.examples.jobhistoryprocessor;
-
-import hu.mta.sztaki.lpds.cloud.simulator.Timed;
-import hu.mta.sztaki.lpds.cloud.simulator.energy.specialized.IaaSEnergyMeter;
-import hu.mta.sztaki.lpds.cloud.simulator.iaas.IaaSService;
-import hu.mta.sztaki.lpds.cloud.simulator.iaas.PhysicalMachine;
 
 import java.io.BufferedWriter;
 import java.io.FileWriter;
@@ -34,25 +30,76 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
+import java.util.concurrent.ConcurrentLinkedQueue;
+
+import hu.mta.sztaki.lpds.cloud.simulator.Timed;
+import hu.mta.sztaki.lpds.cloud.simulator.energy.specialized.IaaSEnergyMeter;
+import hu.mta.sztaki.lpds.cloud.simulator.iaas.IaaSService;
+import hu.mta.sztaki.lpds.cloud.simulator.iaas.PhysicalMachine;
 
 /**
  * Collects and aggregates statistical data representing a particular run of a
  * cloud system.
  * 
- * @author 
- *         "Gabor Kecskemeti, Laboratory of Parallel and Distributed Systems, MTA SZTAKI (c) 2012-5"
+ * @author "Gabor Kecskemeti, Department of Computer Science, Liverpool John
+ *         Moores University, (c) 2017"
+ * @author "Gabor Kecskemeti, Laboratory of Parallel and Distributed Systems,
+ *         MTA SZTAKI (c) 2012-5"
  */
 class StateMonitor extends Timed {
 	/**
-	 * All collected data so far
+	 * All collected data that has not been written out yet
 	 */
-	private ArrayList<OverallSystemState> monitoringDatabase = new ArrayList<OverallSystemState>();
-	/**
-	 * Where do we write the data? Allows to have a threshold on the monitoring
-	 * database and in the future it can be used to continuously empty the
-	 * database to the disk.
-	 */
-	private BufferedWriter bw;
+	private ConcurrentLinkedQueue<OverallSystemState> monitoringDataQueue = new ConcurrentLinkedQueue<OverallSystemState>();
+	private boolean continueRunning = true;
+
+	class DataFlusherThread extends Thread {
+		/**
+		 * Where do we write the data? Allows to have a threshold on the
+		 * monitoring database and in the future it can be used to continuously
+		 * empty the database to the disk.
+		 */
+		private BufferedWriter bw;
+
+		public DataFlusherThread(String traceFile) throws IOException {
+			if (MultiIaaSJobDispatcher.verbosity) {
+				System.err.println("Data flusher thread starts");
+			}
+			bw = new BufferedWriter(new FileWriter(traceFile + ".converted"));
+			bw.write("UnixTime*1000" + ",NrFinished,NrQueued,VMNum,UsedCores,OnPMs,CentralRepoTX\n");
+			start();
+		}
+
+		@Override
+		public void run() {
+			try {
+				do {
+					while (monitoringDataQueue.peek() == null && continueRunning) {
+						try {
+							sleep(50);
+						} catch (InterruptedException ie) {
+
+						}
+					}
+					OverallSystemState st = null;
+					while ((st = monitoringDataQueue.poll()) != null) {
+						// Afterwards we write out the collected statistics to
+						// the
+						// output csv file
+						bw.write(st.toString());
+					}
+				} while (continueRunning);
+				bw.close();
+			} catch (IOException e) {
+				throw new RuntimeException("Problem with writing out the monitoring database", e);
+			}
+			System.err.println("State information written " + Calendar.getInstance().getTimeInMillis());
+			if (MultiIaaSJobDispatcher.verbosity) {
+				System.err.println("Data flusher thread terminates");
+			}
+		}
+	}
+
 	/**
 	 * The list of energy meters controlled by this state monitor. During a
 	 * regular runtime, here we will have a meter for every physical machine in
@@ -95,12 +142,10 @@ class StateMonitor extends Timed {
 	 * @throws IOException
 	 *             if there was a output file creation error
 	 */
-	public StateMonitor(String traceFile, MultiIaaSJobDispatcher dispatcher,
-			List<IaaSService> iaasList, int interval) throws IOException {
-		bw = new BufferedWriter(new FileWriter(traceFile + ".converted"));
-		bw.write("UnixTime*1000"
-				+ ",NrFinished,NrQueued,VMNum,UsedCores,OnPMs,CentralRepoTX\n");
+	public StateMonitor(String traceFile, MultiIaaSJobDispatcher dispatcher, List<IaaSService> iaasList, int interval)
+			throws IOException {
 		System.err.println("Power metering started with delay " + interval);
+		new DataFlusherThread(traceFile);
 		this.iaasList = iaasList;
 		this.dispatcher = dispatcher;
 		for (IaaSService iaas : iaasList) {
@@ -127,48 +172,32 @@ class StateMonitor extends Timed {
 				PhysicalMachine pm = iaas.machines.get(j);
 				current.finishedVMs += pm.getCompletedVMs();
 				current.runningVMs += pm.numofCurrentVMs();
-				current.usedCores += pm.getCapacities().getRequiredCPUs()
-						- pm.freeCapacities.getRequiredCPUs();
+				current.usedCores += pm.getCapacities().getRequiredCPUs() - pm.freeCapacities.getRequiredCPUs();
 				current.runningPMs += pm.isRunning() ? 1 : 0;
 			}
 			current.queueLen += iaas.sched.getQueueLength();
-			current.totalTransferredData += iaas.repositories.get(0).outbws
-					.getTotalProcessed();
+			current.totalTransferredData += iaas.repositories.get(0).outbws.getTotalProcessed();
 		}
 		current.timeStamp = Timed.getFireCount();
 		// Recording it
-		monitoringDatabase.add(current);
+		monitoringDataQueue.add(current);
 
 		// Checking for termination conditions:
-		if (!dispatcher.isSubscribed() && current.queueLen == 0
-				&& current.runningVMs == 0) {
+		if (!dispatcher.isSubscribed() && current.queueLen == 0 && current.runningVMs == 0) {
 			// We now terminate
 			unsubscribe(); // first we cancel our future events
 			// then we cancel the future energy monitoring of all PMs
 			for (IaaSEnergyMeter em : meters) {
 				em.stopMeter();
 			}
-			try {
-				// Afterwards we write out the collected statistics to the
-				// output csv file
-				for (OverallSystemState st : monitoringDatabase) {
-					bw.write(st.toString());
-				}
-				bw.close();
-			} catch (IOException e) {
-				throw new RuntimeException(
-						"Problem with writing out the monitoring database", e);
-			}
-			System.err.println("State information written "
-					+ Calendar.getInstance().getTimeInMillis());
+			continueRunning = false;
 			double sum = 0;
 			// finally we collect and aggregate the energy consumption data
 			for (IaaSEnergyMeter m : meters) {
 				sum += m.getTotalConsumption();
 			}
 			// Warning! assuming ms base.
-			System.err.println("Total power consumption: " + sum / 1000
-					/ 3600000 + " kWh");
+			System.err.println("Total power consumption: " + sum / 1000 / 3600000 + " kWh");
 		}
 	}
 }
