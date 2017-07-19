@@ -24,14 +24,18 @@
 package hu.mta.sztaki.lpds.cloud.simulator.examples;
 
 import hu.mta.sztaki.lpds.cloud.simulator.Timed;
+import hu.mta.sztaki.lpds.cloud.simulator.energy.powermodelling.PowerState;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.resourcemodel.ConsumptionEventAdapter;
 import hu.mta.sztaki.lpds.cloud.simulator.io.NetworkNode.NetworkException;
 import hu.mta.sztaki.lpds.cloud.simulator.io.Repository;
 import hu.mta.sztaki.lpds.cloud.simulator.io.StorageObject;
+import hu.mta.sztaki.lpds.cloud.simulator.util.PowerTransitionGenerator;
 import hu.mta.sztaki.lpds.cloud.simulator.util.SeedSyncer;
 
 import java.util.Calendar;
+import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.Map;
 
 /**
  * A demonstrator for the simulator's network transfer operations through the
@@ -173,13 +177,18 @@ public class TransferDemo extends ConsumptionEventAdapter {
 			latencyMap.put("Repo" + i, 6); // between all networked entities we
 											// will have a 6 ms latency
 		}
+		final EnumMap<PowerTransitionGenerator.PowerStateKind, Map<String, PowerState>> transitions = PowerTransitionGenerator
+				.generateTransitions(20, 296, 493, 50, 108);
+
 		long msstart = Calendar.getInstance().getTimeInMillis();
 		// We will represent networked entities with repositories.
 		repos = new Repository[repoCount];
 		for (int i = 0; i < repoCount; i++) {
 			// Each repository is capable of storing 111PBs of data.
 			repos[i] = new Repository(111111111111111111L, "Repo" + i,
-					bandwidth, bandwidth, bandwidth, latencyMap);
+					bandwidth, bandwidth, bandwidth, latencyMap,transitions
+					.get(PowerTransitionGenerator.PowerStateKind.storage),transitions
+					.get(PowerTransitionGenerator.PowerStateKind.network));
 		}
 		System.out.print((verbose ? "Repositories created. Timing (ms):  "
 				: "R (ms): ")

@@ -24,6 +24,7 @@
 package hu.mta.sztaki.lpds.cloud.simulator.examples;
 
 import hu.mta.sztaki.lpds.cloud.simulator.Timed;
+import hu.mta.sztaki.lpds.cloud.simulator.energy.powermodelling.PowerState;
 import hu.mta.sztaki.lpds.cloud.simulator.energy.specialized.PhysicalMachineEnergyMeter;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.PhysicalMachine;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.VirtualMachine;
@@ -35,7 +36,9 @@ import hu.mta.sztaki.lpds.cloud.simulator.util.PowerTransitionGenerator;
 
 import java.io.RandomAccessFile;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Demonstrates simple non-live migration and energy reading facilities in
@@ -47,12 +50,12 @@ import java.util.HashMap;
  * 
  * This class was created to demonstrate the simulator's alignment with the
  * findings of the following paper:<br>
- * <i>Vincenzo De Maio, Gabor Kecskemeti, Radu Prodan:
- * "A Workload-Aware Energy Model for Virtual Machine Migration". In the
- * proceedings of the 2015 IEEE International conference on Cluster Computing.</i>
+ * <i>Vincenzo De Maio, Gabor Kecskemeti, Radu Prodan: "A Workload-Aware Energy
+ * Model for Virtual Machine Migration". In the proceedings of the 2015 IEEE
+ * International conference on Cluster Computing.</i>
  * 
- * @author 
- *         "Gabor Kecskemeti, Laboratory of Parallel and Distributed Systems, MTA SZTAKI (c) 2015"
+ * @author "Gabor Kecskemeti, Laboratory of Parallel and Distributed Systems,
+ *         MTA SZTAKI (c) 2015"
  */
 public class MigrationModeling {
 
@@ -67,24 +70,25 @@ public class MigrationModeling {
 		latencyMap.put("pm1", 3);
 		latencyMap.put("pm2", 3);
 		latencyMap.put("repo", 3);
+		final EnumMap<PowerTransitionGenerator.PowerStateKind, Map<String, PowerState>> transitions = PowerTransitionGenerator
+				.generateTransitions(10, 200, 300, 5, 5);
+		final Map<String, PowerState> cpuTransitions = transitions.get(PowerTransitionGenerator.PowerStateKind.host);
+		final Map<String, PowerState> stTransitions = transitions.get(PowerTransitionGenerator.PowerStateKind.storage);
+		final Map<String, PowerState> nwTransitions = transitions.get(PowerTransitionGenerator.PowerStateKind.network);
 
 		// Repository setup
-		Repository r = new Repository(disksize, "repo", 10000, 10000, 10000,
-				latencyMap);
-		VirtualAppliance va = new VirtualAppliance("va", 100, 0, false,
-				100000000l);
+		Repository r = new Repository(disksize, "repo", 10000, 10000, 10000, latencyMap, stTransitions, nwTransitions);
+		VirtualAppliance va = new VirtualAppliance("va", 100, 0, false, 100000000l);
 		r.registerObject(va);
 
 		// Basic PM construction
 		PhysicalMachine pm1, pm2;
-		pm1 = new PhysicalMachine(1, 1, 1000, new Repository(disksize, "pm1",
-				10000, 10000, 10000, latencyMap), 10, 10,
-				PowerTransitionGenerator
-						.generateTransitions(10, 200, 300, 5, 5));
-		pm2 = new PhysicalMachine(1, 1, 1000, new Repository(disksize, "pm2",
-				10000, 10000, 10000, latencyMap), 10, 10,
-				PowerTransitionGenerator
-						.generateTransitions(10, 200, 300, 5, 5));
+		pm1 = new PhysicalMachine(1, 1, 1000,
+				new Repository(disksize, "pm1", 10000, 10000, 10000, latencyMap, stTransitions, nwTransitions), 10, 10,
+				cpuTransitions);
+		pm2 = new PhysicalMachine(1, 1, 1000,
+				new Repository(disksize, "pm2", 10000, 10000, 10000, latencyMap, stTransitions, nwTransitions), 10, 10,
+				cpuTransitions);
 
 		// Meter setup for the PMs
 		pmm1 = new PhysicalMachineEnergyMeter(pm1);
@@ -147,8 +151,7 @@ public class MigrationModeling {
 		Timed.simulateUntil(Timed.getFireCount() + 1000);
 		// Initiation of the migration after some processing was done during the
 		// delay
-		vm.migrate(pm2.allocateResources(vm.getResourceAllocation().allocated,
-				true, 100000));
+		vm.migrate(pm2.allocateResources(vm.getResourceAllocation().allocated, true, 100000));
 		// Ensuring the migration is done and the processing of the VM's only
 		// task is completed
 		Timed.simulateUntilLastEvent();
@@ -158,8 +161,7 @@ public class MigrationModeling {
 
 		for (int i = 0; i < readingtime.size(); i++) {
 			// CSV format: time, pm1 energy reading, pm2 energy reading
-			raf.writeBytes(readingtime.get(i) + "," + readingpm1.get(i) + ","
-					+ readingpm2.get(i) + "\n");
+			raf.writeBytes(readingtime.get(i) + "," + readingpm1.get(i) + "," + readingpm2.get(i) + "\n");
 		}
 		raf.close();
 	}

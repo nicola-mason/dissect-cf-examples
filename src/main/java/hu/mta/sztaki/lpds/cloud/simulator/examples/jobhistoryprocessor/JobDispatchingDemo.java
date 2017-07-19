@@ -31,6 +31,7 @@ import java.util.Calendar;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import hu.mta.sztaki.lpds.cloud.simulator.Timed;
 import hu.mta.sztaki.lpds.cloud.simulator.energy.powermodelling.PowerState;
@@ -208,30 +209,38 @@ public class JobDispatchingDemo {
 				IaaSService iaas = new IaaSService(vmSched, pmSched);
 				final String repoid = clid + "VHStorageDell";
 				final String machineid = clid + "VHNode";
+				// Specification of the default power behavior
+				final EnumMap<PowerTransitionGenerator.PowerStateKind, Map<String, PowerState>> transitions = PowerTransitionGenerator
+						.generateTransitions(20, 296, 493, 50, 108);
+				final Map<String, PowerState> cpuTransitions = transitions
+						.get(PowerTransitionGenerator.PowerStateKind.host);
+				final Map<String, PowerState> stTransitions = transitions
+						.get(PowerTransitionGenerator.PowerStateKind.storage);
+				final Map<String, PowerState> nwTransitions = transitions
+						.get(PowerTransitionGenerator.PowerStateKind.network);
 
 				// Creating the Repositories for the cloud
 
 				// scaling the bandwidth accroding to the size of the cloud
 				final double bwRatio = (numofCores * numofNodes) / (7f * 64f);
 				// A single repo will hold 36T of data
-				iaas.registerRepository(new Repository(36000000000000l, repoid, (long) (bwRatio * 1250000),
-						(long) (bwRatio * 1250000), (long) (bwRatio * 250000), latencyMapRepo));
+				iaas.registerRepository(
+						new Repository(36000000000000l, repoid, (long) (bwRatio * 1250000), (long) (bwRatio * 1250000),
+								(long) (bwRatio * 250000), latencyMapRepo, stTransitions, nwTransitions));
 				latencyMapMachine.put(repoid, 5); // 5 ms latency towards the
 													// repos
 
 				// Creating the PMs for the cloud
 
-				// Specification of the default power behavior in PMs
-				final EnumMap<PhysicalMachine.PowerStateKind, EnumMap<PhysicalMachine.State, PowerState>> transitions = PowerTransitionGenerator
-						.generateTransitions(20, 296, 493, 50, 108);
 				ArrayList<PhysicalMachine> completePMList = new ArrayList<PhysicalMachine>(numofNodes);
 				for (int i = 1; i <= numofNodes; i++) {
 					String currid = machineid + i;
 					final double pmBWRatio = Math.max(numofCores / 7f, 1);
 					PhysicalMachine pm = new PhysicalMachine(numofCores, 0.001, 256000000000l,
 							new Repository(5000000000000l, currid, (long) (pmBWRatio * 250000),
-									(long) (pmBWRatio * 250000), (long) (pmBWRatio * 50000), latencyMapMachine),
-							89000, 29000, transitions);
+									(long) (pmBWRatio * 250000), (long) (pmBWRatio * 50000), latencyMapMachine,
+									stTransitions, nwTransitions),
+							89000, 29000, cpuTransitions);
 					latencyMapRepo.put(currid, 5);
 					latencyMapMachine.put(currid, 3);
 					completePMList.add(pm);

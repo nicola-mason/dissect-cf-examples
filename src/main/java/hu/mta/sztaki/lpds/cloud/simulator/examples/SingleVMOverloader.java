@@ -24,6 +24,7 @@
 package hu.mta.sztaki.lpds.cloud.simulator.examples;
 
 import hu.mta.sztaki.lpds.cloud.simulator.Timed;
+import hu.mta.sztaki.lpds.cloud.simulator.energy.powermodelling.PowerState;
 import hu.mta.sztaki.lpds.cloud.simulator.examples.jobhistoryprocessor.DCFJob;
 import hu.mta.sztaki.lpds.cloud.simulator.helpers.job.Job;
 import hu.mta.sztaki.lpds.cloud.simulator.helpers.job.JobListAnalyser;
@@ -36,21 +37,24 @@ import hu.mta.sztaki.lpds.cloud.simulator.io.VirtualAppliance;
 import hu.mta.sztaki.lpds.cloud.simulator.util.PowerTransitionGenerator;
 
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Allows the stress testing of a single VM with arbitrary load. The load of the
  * VM can be defined using the RepetitiveRandomTraceGenerator from the
  * DistSystJavaHelpers package.
  * 
- * This class was used to provide the input for Figures 12-13 in the article:<br>
- * <i>Gabor Kecskemeti:
- * "DISSECT-CF: a simulator to foster energy-aware scheduling in infrastructure clouds"
- * . In Simulation Modeling Practice and Theory, 2015, to Appear.<i>
+ * This class was used to provide the input for Figures 12-13 in the
+ * article:<br>
+ * <i>Gabor Kecskemeti: "DISSECT-CF: a simulator to foster energy-aware
+ * scheduling in infrastructure clouds" . In Simulation Modeling Practice and
+ * Theory, 2015, to Appear.<i>
  * 
- * @author 
- *         "Gabor Kecskemeti, Laboratory of Parallel and Distributed Systems, MTA SZTAKI (c) 2014"
+ * @author "Gabor Kecskemeti, Laboratory of Parallel and Distributed Systems,
+ *         MTA SZTAKI (c) 2014"
  */
 public class SingleVMOverloader {
 	static int jobhits = 0;
@@ -60,34 +64,32 @@ public class SingleVMOverloader {
 
 	public static void main(String[] args) throws Exception {
 		int machinecores = 1;
-		System.err.println("SingleVMOverloader - DISSECT-CF - started at "
-				+ System.currentTimeMillis());
+		System.err.println("SingleVMOverloader - DISSECT-CF - started at " + System.currentTimeMillis());
 		HashMap<String, Integer> latencyMap = new HashMap<String, Integer>();
+		final EnumMap<PowerTransitionGenerator.PowerStateKind, Map<String, PowerState>> transitions = PowerTransitionGenerator
+				.generateTransitions(20, 280, 490, 25, 35);
+
 		// The definition of the PM
-		PhysicalMachine pm = new PhysicalMachine(machinecores, 1,
-				256000000000l, new Repository(5000000000000l, "PMID",
-						250000000, 250000000, 50000000, latencyMap), 89000,
-				29000, PowerTransitionGenerator.generateTransitions(20, 280,
-						490, 25, 35));
+		PhysicalMachine pm = new PhysicalMachine(machinecores, 1, 256000000000l,
+				new Repository(5000000000000l, "PMID", 250000000, 250000000, 50000000, latencyMap,
+						transitions.get(PowerTransitionGenerator.PowerStateKind.storage),
+						transitions.get(PowerTransitionGenerator.PowerStateKind.network)),
+				89000, 29000, transitions.get(PowerTransitionGenerator.PowerStateKind.host));
 		// The virtual machine image to be used for the future VM
-		VirtualAppliance va = new VirtualAppliance("test", 30000, 0, false,
-				100000000);
+		VirtualAppliance va = new VirtualAppliance("test", 30000, 0, false, 100000000);
 		// Placing the VM's image on the PMs local disk
 		pm.localDisk.registerObject(va);
 		pm.turnon();
 		Timed.simulateUntilLastEvent();
 		// by this time the PM is on
-		final VirtualMachine vm = pm.requestVM(va, pm.getCapacities(),
-				pm.localDisk, 1)[0];
+		final VirtualMachine vm = pm.requestVM(va, pm.getCapacities(), pm.localDisk, 1)[0];
 		Timed.simulateUntilLastEvent();
 		// by this time the VM is running on the PM
 		basetime = Timed.getFireCount();
-		System.err.println("PM and VM is prepared "
-				+ System.currentTimeMillis());
+		System.err.println("PM and VM is prepared " + System.currentTimeMillis());
 		// Parsing the trace characteristics for RepetitiveRandomTraceGenerator
 		String[] params = args[0].split("/");
-		RepetitiveRandomTraceGenerator trgen = new RepetitiveRandomTraceGenerator(
-				DCFJob.class);
+		RepetitiveRandomTraceGenerator trgen = new RepetitiveRandomTraceGenerator(DCFJob.class);
 		trgen.setJobNum(Integer.parseInt(args[1]));
 		trgen.setParallel(Integer.parseInt(params[0]));
 		trgen.setMaxStartSpread(Integer.parseInt(params[1]));
@@ -116,14 +118,12 @@ public class SingleVMOverloader {
 			public JSender() {
 				// Makes sure the first event will come upon the first job's
 				// arrival.
-				subscribe(getConvertedFirecount(currentcount)
-						- Timed.getFireCount());
+				subscribe(getConvertedFirecount(currentcount) - Timed.getFireCount());
 			}
 
 			// Transforms job arrival times to be in the VMs lifetime
 			public long getConvertedFirecount(int count) {
-				return count >= jobslen ? -1 : jobs.get(count)
-						.getSubmittimeSecs() * 1000 + basetime;
+				return count >= jobslen ? -1 : jobs.get(count).getSubmittimeSecs() * 1000 + basetime;
 			}
 
 			@Override
@@ -158,17 +158,13 @@ public class SingleVMOverloader {
 		Timed.simulateUntilLastEvent();
 		// Statistics printouts
 		long after = System.currentTimeMillis();
-		System.err.println("Final job has completed, took " + (after - before)
-				+ " ms");
+		System.err.println("Final job has completed, took " + (after - before) + " ms");
 		long afterSimu = Timed.getFireCount();
-		System.err.println("Total simulated time " + (afterSimu - basetime)
-				+ " ms");
+		System.err.println("Total simulated time " + (afterSimu - basetime) + " ms");
 		if (jobhits == jobs.size()) {
 			System.err.println("All jobs terminated successfully..");
 		} else {
-			System.err
-					.println("Not completed all jobs! Successful completions: "
-							+ jobhits);
+			System.err.println("Not completed all jobs! Successful completions: " + jobhits);
 		}
 	}
 
