@@ -138,7 +138,7 @@ public class JobDispatchingDemo {
 			try {
 				@SuppressWarnings("rawtypes")
 				Class trial = Class.forName(consolidatorClass);
-				if (Scheduler.class.isAssignableFrom(trial)) {
+				if (Consolidator.class.isAssignableFrom(trial)) {
 					consolidator = trial;
 				} else {
 					consolidator = SimpleConsolidator.class;
