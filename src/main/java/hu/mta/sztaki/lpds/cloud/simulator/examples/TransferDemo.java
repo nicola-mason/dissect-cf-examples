@@ -27,6 +27,7 @@ import hu.mta.sztaki.lpds.cloud.simulator.Timed;
 import hu.mta.sztaki.lpds.cloud.simulator.energy.powermodelling.PowerState;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.resourcemodel.ConsumptionEventAdapter;
 import hu.mta.sztaki.lpds.cloud.simulator.io.NetworkNode.NetworkException;
+import hu.mta.sztaki.lpds.cloud.simulator.io.NetworkNode;
 import hu.mta.sztaki.lpds.cloud.simulator.io.Repository;
 import hu.mta.sztaki.lpds.cloud.simulator.io.StorageObject;
 import hu.mta.sztaki.lpds.cloud.simulator.util.PowerTransitionGenerator;
@@ -189,6 +190,7 @@ public class TransferDemo extends ConsumptionEventAdapter {
 					bandwidth, bandwidth, bandwidth, latencyMap,transitions
 					.get(PowerTransitionGenerator.PowerStateKind.storage),transitions
 					.get(PowerTransitionGenerator.PowerStateKind.network));
+			repos[i].setState(NetworkNode.State.RUNNING);
 		}
 		System.out.print((verbose ? "Repositories created. Timing (ms):  "
 				: "R (ms): ")

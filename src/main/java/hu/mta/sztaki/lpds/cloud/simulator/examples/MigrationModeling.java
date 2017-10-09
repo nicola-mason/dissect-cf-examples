@@ -30,6 +30,7 @@ import hu.mta.sztaki.lpds.cloud.simulator.iaas.PhysicalMachine;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.VirtualMachine;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.resourcemodel.ConsumptionEventAdapter;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.resourcemodel.ResourceConsumption;
+import hu.mta.sztaki.lpds.cloud.simulator.io.NetworkNode;
 import hu.mta.sztaki.lpds.cloud.simulator.io.Repository;
 import hu.mta.sztaki.lpds.cloud.simulator.io.VirtualAppliance;
 import hu.mta.sztaki.lpds.cloud.simulator.util.PowerTransitionGenerator;
@@ -80,6 +81,7 @@ public class MigrationModeling {
 		Repository r = new Repository(disksize, "repo", 10000, 10000, 10000, latencyMap, stTransitions, nwTransitions);
 		VirtualAppliance va = new VirtualAppliance("va", 100, 0, false, 100000000l);
 		r.registerObject(va);
+		r.setState(NetworkNode.State.RUNNING);
 
 		// Basic PM construction
 		PhysicalMachine pm1, pm2;
