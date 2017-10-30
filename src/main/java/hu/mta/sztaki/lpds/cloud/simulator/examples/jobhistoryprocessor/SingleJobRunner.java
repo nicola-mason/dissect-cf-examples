@@ -22,6 +22,7 @@
  */
 package hu.mta.sztaki.lpds.cloud.simulator.examples.jobhistoryprocessor;
 
+import hu.mta.sztaki.lpds.cloud.simulator.DeferredEvent;
 import hu.mta.sztaki.lpds.cloud.simulator.helpers.job.Job;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.VMManager;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.VirtualMachine;
@@ -29,18 +30,37 @@ import hu.mta.sztaki.lpds.cloud.simulator.iaas.resourcemodel.ResourceConsumption
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.resourcemodel.ResourceConsumption.ConsumptionEvent;
 
 public class SingleJobRunner implements VirtualMachine.StateChange, ConsumptionEvent {
+	public static final long defaultStartupTimeout = 24 * 3600000; // a day
+	public static final long startupTimeout;
+
+	static {
+		String to = System.getProperty("hu.mta.sztaki.lpds.cloud.simulator.examples.startupTimeout");
+		startupTimeout = to == null ? defaultStartupTimeout : Long.parseLong(to);
+	}
 	private Job toProcess;
+	private VMKeeper[] keeperSet;
 	private VirtualMachine[] vmSet;
 	private MultiIaaSJobDispatcher parent;
 	private int readyVMCounter = 0;
 	private int completionCounter = 0;
+	private DeferredEvent timeout = new DeferredEvent(startupTimeout) {
 
-	public SingleJobRunner(final Job runMe, final VirtualMachine[] onUs, MultiIaaSJobDispatcher forMe) {
+		@Override
+		protected void eventAction() {
+			// After our timeout we still don't have all VMs started, we just forget about
+			// this job
+			releaseVMset();
+		}
+	};
+
+	public SingleJobRunner(final Job runMe, final VMKeeper[] onUs, MultiIaaSJobDispatcher forMe) {
 		toProcess = runMe;
-		vmSet = onUs;
+		keeperSet = onUs;
 		parent = forMe;
+		vmSet = new VirtualMachine[keeperSet.length];
 		// Ensuring we receive state dependent events about the new VMs
-		for (int i = 0; i < vmSet.length; i++) {
+		for (int i = 0; i < keeperSet.length; i++) {
+			vmSet[i] = keeperSet[i].acquire();
 			vmSet[i].subscribeStateChange(this);
 		}
 		// Increasing ignorecounter in order to sign that the job in this runner
@@ -79,9 +99,10 @@ public class SingleJobRunner implements VirtualMachine.StateChange, ConsumptionE
 			if (++readyVMCounter == vmSet.length) {
 				// Mark that we start the job / no further queuing
 				toProcess.started();
+				timeout.cancel();
 				try {
 					// vmset could get null if the compute task is rapidly terminating!
-					for (int i = 0; vmSet!=null && i < vmSet.length; i++) {
+					for (int i = 0; vmSet != null && i < vmSet.length; i++) {
 						// run the job's relevant part in the VM
 						vmSet[i].newComputeTask(
 								toProcess.getExectimeSecs()
@@ -107,23 +128,22 @@ public class SingleJobRunner implements VirtualMachine.StateChange, ConsumptionE
 		if (++completionCounter == vmSet.length) {
 			// everything went smoothly we mark it in the job
 			toProcess.completed();
-			try {
-				// the VMs are no longer needed
-				for (int i = 0; i < vmSet.length; i++) {
-					vmSet[i].unsubscribeStateChange(this);
-					vmSet[i].destroy(false);
-					vmSet[i] = null;
-				}
-			} catch (VMManager.VMManagementException e) {
-				System.err.println("VM could not be destroyed after job completion.");
-				e.printStackTrace();
-				System.exit(1);
-			}
+			// the VMs are no longer needed
+			releaseVMset();
 			parent.increaseDestroyCounter(completionCounter);
 			parent.ignorecounter--;
 			parent = null;
 			vmSet = null;
 			toProcess = null;
+		}
+	}
+
+	private void releaseVMset() {
+		for (int i = 0; i < vmSet.length; i++) {
+			vmSet[i].unsubscribeStateChange(this);
+			keeperSet[i].release(vmSet[i]);
+			keeperSet[i] = null;
+			vmSet[i] = null;
 		}
 	}
 
