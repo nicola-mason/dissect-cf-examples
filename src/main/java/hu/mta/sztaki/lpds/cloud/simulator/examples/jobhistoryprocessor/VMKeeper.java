@@ -26,6 +26,7 @@ import java.util.Comparator;
 
 import hu.mta.sztaki.lpds.cloud.simulator.Timed;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.IaaSService;
+import hu.mta.sztaki.lpds.cloud.simulator.iaas.PhysicalMachine;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.VMManager;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.VMManager.VMManagementException;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.VirtualMachine.State;
@@ -51,12 +52,37 @@ public class VMKeeper extends Timed implements VirtualMachine.StateChange {
 	private static class KeeperComparator implements Comparator<VMKeeper> {
 		@Override
 		public int compare(VMKeeper o1, VMKeeper o2) {
-			return o1.vm.getResourceAllocation().allocated.compareTo(o2.vm.getResourceAllocation().allocated);
+			PhysicalMachine.ResourceAllocation ra1 = o1.vm.getResourceAllocation();
+			PhysicalMachine.ResourceAllocation ra2 = o2.vm.getResourceAllocation();
+			if (ra1 == null) {
+				if (ra2 == null) {
+					return 0;
+				} else {
+					return -1;
+				}
+			} else {
+				if (ra2 == null) {
+					return 1;
+				} else {
+					return ra1.allocated.compareTo(ra2.allocated);
+				}
+			}
 		}
 	}
 
-	public static final boolean keepVMs = System
-			.getProperty("hu.mta.sztaki.lpds.cloud.simulator.examples.keepVMs") != null;
+	public static interface ReleaseListener {
+		void released(VMKeeper me);
+	}
+
+	public static final boolean keepVMs;
+	public static int prematureVMs = 0;
+	public static int expiredVMs = 0;
+
+	static {
+		keepVMs = System.getProperty("hu.mta.sztaki.lpds.cloud.simulator.examples.keepVMs") != null;
+		if (keepVMs)
+			System.err.println("VMKeeper is switched on!");
+	}
 
 	/**
 	 * Allows sorting keepers based on their VM's resource size
@@ -81,6 +107,8 @@ public class VMKeeper extends Timed implements VirtualMachine.StateChange {
 	private final long startTime;
 
 	private boolean alive;
+
+	private ReleaseListener listener;
 
 	public VMKeeper(IaaSService onCloud, VirtualMachine vm, long billingPeriod) {
 		this.onCloud = onCloud;
@@ -119,7 +147,8 @@ public class VMKeeper extends Timed implements VirtualMachine.StateChange {
 	 * @return true if the VM could host such resource set, false otherwise
 	 */
 	public boolean wouldFit(ResourceConstraints rc) {
-		return rc.compareTo(vm.getResourceAllocation().allocated) <= 0;
+		PhysicalMachine.ResourceAllocation ra = vm.getResourceAllocation();
+		return ra != null && rc.compareTo(vm.getResourceAllocation().allocated) <= 0;
 	}
 
 	/**
@@ -159,6 +188,9 @@ public class VMKeeper extends Timed implements VirtualMachine.StateChange {
 		if (vm == this.vm) {
 			if (VMKeeper.keepVMs) {
 				startSubscription();
+				if (listener != null) {
+					listener.released(this);
+				}
 			} else {
 				destroyMyVM();
 			}
@@ -182,6 +214,7 @@ public class VMKeeper extends Timed implements VirtualMachine.StateChange {
 	 */
 	public void prematureDestroy() {
 		if (isSubscribed()) {
+			prematureVMs++;
 			tick(Timed.getFireCount());
 		} else {
 			throw new RuntimeException("The VM is in use, it must be released before destruction");
@@ -229,7 +262,12 @@ public class VMKeeper extends Timed implements VirtualMachine.StateChange {
 	 */
 	@Override
 	public void tick(long fires) {
+		expiredVMs++;
 		destroyMyVM();
 		unsubscribe();
+	}
+
+	public void setListener(ReleaseListener listener) {
+		this.listener = listener;
 	}
 }

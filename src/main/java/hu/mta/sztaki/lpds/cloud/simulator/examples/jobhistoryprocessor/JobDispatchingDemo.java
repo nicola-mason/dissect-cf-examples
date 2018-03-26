@@ -361,7 +361,7 @@ public class JobDispatchingDemo {
 		System.err.println("Current simulation time: " + Timed.getFireCount());
 		System.err.println("Simulated timespan: " + (Timed.getFireCount() - dispatcher.getMinsubmittime() * 1000));
 		System.err.println("Final number of: Ignored jobs - " + dispatcher.getIgnorecounter() + " Destroyed VMs - "
-				+ dispatcher.getDestroycounter());
+				+ dispatcher.getDestroycounter() + " reused VMs: "+ dispatcher.reuseCounter);
 		if (consolidator != null) {
 			System.err.println("Total migrations done: " + SimpleConsolidator.migrationCount);
 		}

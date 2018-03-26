@@ -36,6 +36,7 @@ public class SingleJobRunner implements VirtualMachine.StateChange, ConsumptionE
 	static {
 		String to = System.getProperty("hu.mta.sztaki.lpds.cloud.simulator.examples.startupTimeout");
 		startupTimeout = to == null ? defaultStartupTimeout : Long.parseLong(to);
+		System.err.println("VM startup timeout is set to " + startupTimeout);
 	}
 	private Job toProcess;
 	private VMKeeper[] keeperSet;
@@ -61,12 +62,17 @@ public class SingleJobRunner implements VirtualMachine.StateChange, ConsumptionE
 		// Ensuring we receive state dependent events about the new VMs
 		for (int i = 0; i < keeperSet.length; i++) {
 			vmSet[i] = keeperSet[i].acquire();
-			vmSet[i].subscribeStateChange(this);
+			if (VirtualMachine.State.RUNNING.equals(vmSet[i].getState())) {
+				readyVMCounter++;
+			} else {
+				vmSet[i].subscribeStateChange(this);
+			}
 		}
 		// Increasing ignorecounter in order to sign that the job in this runner
 		// is not yet finished (so the premature termination of the simulation
 		// will show the job ignored)
 		parent.ignorecounter++;
+		startProcess();
 	}
 
 	@Override
@@ -96,25 +102,29 @@ public class SingleJobRunner implements VirtualMachine.StateChange, ConsumptionE
 		if (newState.equals(VirtualMachine.State.RUNNING)) {
 			// Ensures that jobs inteded for parallel execution are really run
 			// in parallel
-			if (++readyVMCounter == vmSet.length) {
-				// Mark that we start the job / no further queuing
-				toProcess.started();
-				timeout.cancel();
-				try {
-					// vmset could get null if the compute task is rapidly terminating!
-					for (int i = 0; vmSet != null && i < vmSet.length; i++) {
-						// run the job's relevant part in the VM
-						vmSet[i].newComputeTask(
-								toProcess.getExectimeSecs()
-										* vmSet[i].getResourceAllocation().allocated.getRequiredCPUs(),
-								ResourceConsumption.unlimitedProcessing, this);
-					}
-				} catch (Exception e) {
-					System.err.println(
-							"Unexpected network setup issues while trying to send a new compute task to one of the VMs supporting job processing");
-					e.printStackTrace();
-					System.exit(1);
+			++readyVMCounter;
+			startProcess();
+		}
+	}
+
+	private void startProcess() {
+		if (readyVMCounter == vmSet.length) {
+			// Mark that we start the job / no further queuing
+			toProcess.started();
+			timeout.cancel();
+			try {
+				// vmset could get null if the compute task is rapidly terminating!
+				for (int i = 0; vmSet != null && i < vmSet.length; i++) {
+					// run the job's relevant part in the VM
+					vmSet[i].newComputeTask(
+							toProcess.getExectimeSecs() * vmSet[i].getResourceAllocation().allocated.getRequiredCPUs(),
+							ResourceConsumption.unlimitedProcessing, this);
 				}
+			} catch (Exception e) {
+				System.err.println(
+						"Unexpected network setup issues while trying to send a new compute task to one of the VMs supporting job processing");
+				e.printStackTrace();
+				System.exit(1);
 			}
 		}
 	}

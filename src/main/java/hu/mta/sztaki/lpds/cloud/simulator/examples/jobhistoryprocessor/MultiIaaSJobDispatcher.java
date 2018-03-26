@@ -27,7 +27,10 @@ package hu.mta.sztaki.lpds.cloud.simulator.examples.jobhistoryprocessor;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 
 import hu.mta.sztaki.lpds.cloud.simulator.Timed;
 import hu.mta.sztaki.lpds.cloud.simulator.helpers.job.Job;
@@ -90,7 +93,7 @@ public class MultiIaaSJobDispatcher extends Timed {
 	/**
 	 * the list of Virtual Machine keepers - the list of VMs that might be alive
 	 */
-	protected List<VMKeeper> pooledVMs = new ArrayList<VMKeeper>();
+	protected Set<VMKeeper> pooledVMs = new TreeSet<VMKeeper>(VMKeeper.compareKeepers);
 	/**
 	 * the virtual appliance that will be used as the generic image for each VM in
 	 * the clouds
@@ -130,6 +133,10 @@ public class MultiIaaSJobDispatcher extends Timed {
 	 * current IaaS service to be used for VM creation
 	 */
 	private int targetIndex = 0;
+
+	public int reuseCounter = 0;
+
+	public int actualVMCount = 0;
 
 	/**
 	 * Dispatcher setup. Fetches all jobs from the given trace producer and analyzes
@@ -276,11 +283,11 @@ public class MultiIaaSJobDispatcher extends Timed {
 						// We have a chance to fit the job request in
 
 						// Clean up the VM keeper list of ours
-						int poolSize = pooledVMs.size();
-						for (int j = poolSize - 1; j >= 0; j--) {
-							if (pooledVMs.get(j).isAlive()) {
-								pooledVMs.remove(j);
-								poolSize--;
+						Iterator<VMKeeper> it = pooledVMs.iterator();
+						while (it.hasNext()) {
+							VMKeeper curr = it.next();
+							if (!curr.isAlive()) {
+								it.remove();
 							}
 						}
 
@@ -289,56 +296,68 @@ public class MultiIaaSJobDispatcher extends Timed {
 
 						// Make sure the smallest VMs are listed first
 						// This ensures we leave the smallest amount of unused resources in the VMs
-						if (poolSize > 0) {
-							Collections.sort(pooledVMs, VMKeeper.compareKeepers);
-							for (int j = 0; j < poolSize && requestedTotalInstances > 0; j++) {
-								VMKeeper current = pooledVMs.get(j);
-								if (current.wouldFit(reqRC) && current.isFree()) {
-									vms[vmpointer] = current;
-									requestedTotalInstances--;
-									retry = true;
-								}
+						it = pooledVMs.iterator();
+						while (it.hasNext() && requestedTotalInstances > 0) {
+							VMKeeper current = it.next();
+							if (current.isFree() && current.wouldFit(reqRC)) {
+								reuseCounter++;
+								it.remove();
+								vms[vmpointer++] = current;
+								requestedTotalInstances--;
+								retry = true;
 							}
 						}
 
-						// recalculate requested clouds after reusing VMs
-						requestedClouds = (int) Math.ceil(requestedTotalInstances > maxIaaSmachines
-								? (double) requestedTotalInstances / maxIaaSmachines
-								: 1);
+						if (requestedTotalInstances > 0) {
+							// recalculate requested clouds after reusing VMs
+							requestedClouds = (int) Math.ceil(requestedTotalInstances > maxIaaSmachines
+									? (double) requestedTotalInstances / maxIaaSmachines
+									: 1);
 
-						final int uniformSpread = requestedTotalInstances / requestedClouds;
-						int remainder = requestedTotalInstances % requestedClouds;
+							final int uniformSpread = requestedTotalInstances / requestedClouds;
+							int remainder = requestedTotalInstances % requestedClouds;
 
-						for (int j = 0; j < requestedClouds; j++) {
-							final int expectedSpread = uniformSpread + remainder;
-							final int currentRequestSize = (int) Math.min(maxIaaSmachines, expectedSpread);
-							remainder = expectedSpread - currentRequestSize;
-							// Starting the VMs for the job
-							try {
-								IaaSService currentTarget = target.get(targetIndex);
-								final VirtualMachine[] vmsTemp = currentTarget.requestVM(va, reqRC,
-										repo.get(targetIndex), currentRequestSize);
-								for (int k = 0; k < currentRequestSize; k++) {
-									vms[vmpointer++] = new VMKeeper(currentTarget, vmsTemp[k], baseBillingPeriod);
-								}
+							for (int j = 0; j < requestedClouds; j++) {
+								final int expectedSpread = uniformSpread + remainder;
+								final int currentRequestSize = (int) Math.min(maxIaaSmachines, expectedSpread);
+								remainder = expectedSpread - currentRequestSize;
+								// Starting the VMs for the job
+								try {
+									IaaSService currentTarget = target.get(targetIndex);
+									final VirtualMachine[] vmsTemp = currentTarget.requestVM(va, reqRC,
+											repo.get(targetIndex), currentRequestSize);
+									for (int k = 0; k < currentRequestSize; k++) {
+										VMKeeper newKeeper = new VMKeeper(currentTarget, vmsTemp[k], 3600 * 1000);
+										newKeeper.setListener(new VMKeeper.ReleaseListener() {
 
-								// doing a round robin scheduling for the target
-								// infrastructures
-								targetIndex++;
-								if (targetIndex == target.size()) {
-									targetIndex = 0;
+											@Override
+											public void released(VMKeeper me) {
+												pooledVMs.add(me);
+											}
+										});
+										vms[vmpointer++] = newKeeper;
+
+									}
+
+									// doing a round robin scheduling for the target
+									// infrastructures
+									targetIndex++;
+									if (targetIndex == target.size()) {
+										targetIndex = 0;
+									}
+								} catch (VMManager.VMManagementException e) {
+									// VM cannot be served because of too large resource
+									// request
+									if (verbosity) {
+										System.err
+												.println("The oversized job's id: " + toprocess.getId() + " idx: " + i);
+									}
+									ignorecounter++;
+								} catch (Exception e) {
+									System.err.println("Unknown VM creation error: " + e.getMessage());
+									e.printStackTrace();
+									ignorecounter++;
 								}
-							} catch (VMManager.VMManagementException e) {
-								// VM cannot be served because of too large resource
-								// request
-								if (verbosity) {
-									System.err.println("The oversized job's id: " + toprocess.getId() + " idx: " + i);
-								}
-								ignorecounter++;
-							} catch (Exception e) {
-								System.err.println("Unknown VM creation error: " + e.getMessage());
-								e.printStackTrace();
-								ignorecounter++;
 							}
 						}
 						boolean servability = true;
@@ -349,6 +368,7 @@ public class MultiIaaSJobDispatcher extends Timed {
 							servability &= vms[j].isServable();
 						}
 						if (servability) {
+							retry = false;
 							new SingleJobRunner(toprocess, vms, this);
 						} else {
 							for (int j = 0; j < vms.length; j++) {
@@ -374,7 +394,9 @@ public class MultiIaaSJobDispatcher extends Timed {
 				break;
 			}
 		}
-		if (minindex == jobs.length) {
+		if (minindex == jobs.length)
+
+		{
 			// No more jobs are listed in the trace, we can just make sure no
 			// further events are coming to this dispatcher
 			unsubscribe();
