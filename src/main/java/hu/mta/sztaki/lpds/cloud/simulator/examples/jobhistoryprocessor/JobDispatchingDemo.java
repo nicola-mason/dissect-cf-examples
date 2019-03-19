@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License along
  *  with DISSECT-CF Examples.  If not, see <http://www.gnu.org/licenses/>.
  *  
- *  (C) Copyright 2016, Gabor Kecskemeti (g.kecskemeti@ljmu.ac.uk)
+ *  (C) Copyright 2016-19, Gabor Kecskemeti (g.kecskemeti@ljmu.ac.uk)
  *  (C) Copyright 2013-15, Gabor Kecskemeti (gkecskem@dps.uibk.ac.at,
  *   									  kecskemeti.gabor@sztaki.mta.hu)
  */
@@ -28,13 +28,10 @@ import java.io.File;
 import java.lang.reflect.Constructor;
 import java.util.ArrayList;
 import java.util.Calendar;
-import java.util.EnumMap;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import hu.mta.sztaki.lpds.cloud.simulator.Timed;
-import hu.mta.sztaki.lpds.cloud.simulator.energy.powermodelling.PowerState;
+import hu.mta.sztaki.lpds.cloud.simulator.examples.util.DCCreation;
 import hu.mta.sztaki.lpds.cloud.simulator.helpers.trace.FileBasedTraceProducerFactory;
 import hu.mta.sztaki.lpds.cloud.simulator.helpers.trace.GenericTraceProducer;
 import hu.mta.sztaki.lpds.cloud.simulator.helpers.trace.TraceFilter;
@@ -48,9 +45,7 @@ import hu.mta.sztaki.lpds.cloud.simulator.iaas.pmscheduling.PhysicalMachineContr
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.pmscheduling.SchedulingDependentMachines;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.vmscheduling.FirstFitScheduler;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.vmscheduling.Scheduler;
-import hu.mta.sztaki.lpds.cloud.simulator.io.Repository;
 import hu.mta.sztaki.lpds.cloud.simulator.util.CloudLoader;
-import hu.mta.sztaki.lpds.cloud.simulator.util.PowerTransitionGenerator;
 
 /**
  * This command line program sets up one or more cloud infrastructures, sends a
@@ -67,7 +62,7 @@ import hu.mta.sztaki.lpds.cloud.simulator.util.PowerTransitionGenerator;
  * Theory, 2015, to Appear.<i> *
  * 
  * @author "Gabor Kecskemeti, Department of Computer Science, Liverpool John
- *         Moores University, (c) 2016"
+ *         Moores University, (c) 2016-9"
  * @author "Gabor Kecskemeti, Laboratory of Parallel and Distributed Systems,
  *         MTA SZTAKI (c) 2012-5"
  */
@@ -196,59 +191,11 @@ public class JobDispatchingDemo {
 			// Creating the each cloud requested
 			for (int clid = 0; clid < numofClouds; clid++) {
 				int numofNodes = totNumofNodes / numofClouds;
-				System.err.println(
-						"Scaling datacenter to " + numofNodes + " nodes with " + numofCores + " cpu cores each");
 				if (numofNodes * numofClouds != totNumofNodes) {
 					System.err.println(
 							"WARNING: with equally sized clouds we cannot reach the total number of nodes specified!");
 				}
-				// Default constructs
-
-				HashMap<String, Integer> latencyMapRepo = new HashMap<String, Integer>(numofNodes + 2);
-				HashMap<String, Integer> latencyMapMachine = new HashMap<String, Integer>(numofNodes + 2);
-				IaaSService iaas = new IaaSService(vmSched, pmSched);
-				final String repoid = clid + "VHStorageDell";
-				final String machineid = clid + "VHNode";
-				// Specification of the default power behavior
-				final EnumMap<PowerTransitionGenerator.PowerStateKind, Map<String, PowerState>> transitions = PowerTransitionGenerator
-						.generateTransitions(20, 296, 493, 50, 108);
-				final Map<String, PowerState> cpuTransitions = transitions
-						.get(PowerTransitionGenerator.PowerStateKind.host);
-				final Map<String, PowerState> stTransitions = transitions
-						.get(PowerTransitionGenerator.PowerStateKind.storage);
-				final Map<String, PowerState> nwTransitions = transitions
-						.get(PowerTransitionGenerator.PowerStateKind.network);
-
-				// Creating the Repositories for the cloud
-
-				// scaling the bandwidth accroding to the size of the cloud
-				final double bwRatio = (numofCores * numofNodes) / (7f * 64f);
-				// A single repo will hold 36T of data
-				iaas.registerRepository(
-						new Repository(36000000000000l, repoid, (long) (bwRatio * 1250000), (long) (bwRatio * 1250000),
-								(long) (bwRatio * 250000), latencyMapRepo, stTransitions, nwTransitions));
-				latencyMapMachine.put(repoid, 5); // 5 ms latency towards the
-													// repos
-
-				// Creating the PMs for the cloud
-
-				ArrayList<PhysicalMachine> completePMList = new ArrayList<PhysicalMachine>(numofNodes);
-				for (int i = 1; i <= numofNodes; i++) {
-					String currid = machineid + i;
-					final double pmBWRatio = Math.max(numofCores / 7f, 1);
-					PhysicalMachine pm = new PhysicalMachine(numofCores, 0.001, 256000000000l,
-							new Repository(5000000000000l, currid, (long) (pmBWRatio * 250000),
-									(long) (pmBWRatio * 250000), (long) (pmBWRatio * 50000), latencyMapMachine,
-									stTransitions, nwTransitions),
-							89000, 29000, cpuTransitions);
-					latencyMapRepo.put(currid, 5);
-					latencyMapMachine.put(currid, 3);
-					completePMList.add(pm);
-				}
-
-				// registering the hosts and the IaaS services
-				iaas.bulkHostRegistration(completePMList);
-				iaasList.add(iaas);
+				iaasList.add(DCCreation.createDataCentre(vmSched, pmSched, numofNodes, numofCores));
 			}
 		}
 		// Wait until the PM Controllers finish their initial activities
@@ -361,7 +308,7 @@ public class JobDispatchingDemo {
 		System.err.println("Current simulation time: " + Timed.getFireCount());
 		System.err.println("Simulated timespan: " + (Timed.getFireCount() - dispatcher.getMinsubmittime() * 1000));
 		System.err.println("Final number of: Ignored jobs - " + dispatcher.getIgnorecounter() + " Destroyed VMs - "
-				+ dispatcher.getDestroycounter() + " reused VMs: "+ dispatcher.reuseCounter);
+				+ dispatcher.getDestroycounter() + " reused VMs: " + dispatcher.reuseCounter);
 		if (consolidator != null) {
 			System.err.println("Total migrations done: " + SimpleConsolidator.migrationCount);
 		}
