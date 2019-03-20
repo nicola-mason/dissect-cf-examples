@@ -164,6 +164,7 @@ public class AutoScalingDemo implements TraceExhaustionCallback {
 		System.out.println("Average utilisation of PMs: " + totutil / cloud.machines.size());
 		System.out.println("Total power consumption: " + energymeter.getTotalConsumption() / 1000 / 3600000 + " kWh");
 		System.out.println("Average queue time: " + jobhandler.getAverageQueueTime());
+		System.out.println("Number of applications: " + cloud.repositories.get(0).contents().size());
 	}
 
 	/**
@@ -174,7 +175,6 @@ public class AutoScalingDemo implements TraceExhaustionCallback {
 	 * @throws Exception On any issue this application terminates with a stack trace
 	 */
 	public static void main(String[] args) throws Exception {
-		new AutoScalingDemo(Integer.parseInt(args[1]), Integer.parseInt(args[2]), args[0])
-				.simulateAndprintStatistics();
+		new AutoScalingDemo(Integer.parseInt(args[1]), Integer.parseInt(args[2]), args[0]).simulateAndprintStatistics();
 	}
 }
