@@ -22,6 +22,7 @@
  */
 package uk.ac.ljmu.fet.cs.cloud.examples.autoscaler;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -29,6 +30,7 @@ import java.util.Iterator;
 import hu.mta.sztaki.lpds.cloud.simulator.Timed;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.IaaSService;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.VMManager.VMManagementException;
+import hu.mta.sztaki.lpds.cloud.simulator.iaas.VirtualMachine.State;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.VirtualMachine;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.constraints.ConstantConstraints;
 import hu.mta.sztaki.lpds.cloud.simulator.iaas.constraints.ResourceConstraints;
@@ -45,7 +47,7 @@ import hu.mta.sztaki.lpds.cloud.simulator.io.VirtualAppliance;
  * @author "Gabor Kecskemeti, Department of Computer Science, Liverpool John
  *         Moores University, (c) 2019"
  */
-public class VirtualInfrastructure extends Timed {
+public class VirtualInfrastructure extends Timed implements VirtualMachine.StateChange {
 	/**
 	 * Minimum CPU utilisation percentage of a single VM that is still acceptable to
 	 * keep in the virtual infrastructure.
@@ -65,6 +67,13 @@ public class VirtualInfrastructure extends Timed {
 	 * the map are the actual VMs that we have at hand for a given executable.
 	 */
 	public final HashMap<String, ArrayList<VirtualMachine>> vmSetPerKind = new HashMap<String, ArrayList<VirtualMachine>>();
+
+	/**
+	 * If a kind of VM is under preparation already, we remember it here so we can
+	 * tell which VM kind should not have more VMs instantiated/destructued for the
+	 * time being.
+	 */
+	public final HashMap<String, VirtualMachine> underPrepVMPerKind = new HashMap<String, VirtualMachine>();
 
 	/**
 	 * The cloud on which we will execute our virtual machines
@@ -101,6 +110,11 @@ public class VirtualInfrastructure extends Timed {
 	 * particular executable
 	 */
 	private final HashMap<VirtualMachine, Integer> unnecessaryHits = new HashMap<VirtualMachine, Integer>();
+
+	/**
+	 * Allows us to remember which VM kinds fell out of use
+	 */
+	private final ArrayDeque<String> obsoleteVAs = new ArrayDeque<String>();
 
 	/**
 	 * Initialises the auto scaling mechanism
@@ -140,12 +154,30 @@ public class VirtualInfrastructure extends Timed {
 	 * @param vmKind The executable for which we want a new VM for.
 	 */
 	protected void requestVM(final String vmKind) {
+		if (underPrepVMPerKind.containsKey(vmKind)) {
+			// Ignore the request as we have a VM in preparation already
+			return;
+		}
 		// VMI handling
 		VirtualAppliance va = (VirtualAppliance) storage.lookup(vmKind);
 		if (va == null) {
-			// A random sized VMI with a short boot procedure
-			va = new VirtualAppliance(vmKind, 15, 0);
-			storage.registerObject(va);
+			// A random sized VMI with a short boot procedure. The approximate size of the
+			// VMI will be 1GB.
+			va = new VirtualAppliance(vmKind, 15, 0, true, 1024 * 1024 * 1024);
+			boolean regFail;
+			do {
+				regFail = !storage.registerObject(va);
+				if (regFail) {
+					// Storage ran out of space, remove the VA that became obsolete the longest time
+					// in the past
+					if (obsoleteVAs.isEmpty()) {
+						throw new RuntimeException(
+								"Configured with a repository not big enough to accomodate a the following VA: " + va);
+					}
+					String vaRemove = obsoleteVAs.pollFirst();
+					storage.deregisterObject(vaRemove);
+				}
+			} while (regFail);
 		}
 
 		// VM size is a bit dependent on the VA used
@@ -159,11 +191,13 @@ public class VirtualInfrastructure extends Timed {
 			vmMonitor.startMon();
 			vmmonitors.put(vm, vmMonitor);
 			ArrayList<VirtualMachine> vmset = vmSetPerKind.get(vmKind);
-			if (vmset == null) {
-				vmset = new ArrayList<VirtualMachine>();
-				vmSetPerKind.put(vmKind, vmset);
+			if (vmset.isEmpty()) {
+				// VA became used again, no longer obsolete
+				obsoleteVAs.remove(vmKind);
 			}
 			vmset.add(vm);
+			underPrepVMPerKind.put(vmKind, vm);
+			vm.subscribeStateChange(this);
 		} catch (Exception vmm) {
 			vmm.printStackTrace();
 			System.exit(1);
@@ -179,7 +213,9 @@ public class VirtualInfrastructure extends Timed {
 	protected void destroyVM(final VirtualMachine vm) {
 		vmmonitors.remove(vm).finishMon();
 		try {
-			vmSetPerKind.get(vm.getVa().id).remove(vm);
+			final String vmKind = vm.getVa().id;
+			vmSetPerKind.get(vmKind).remove(vm);
+			underPrepVMPerKind.remove(vmKind);
 			if (VirtualMachine.State.DESTROYED.equals(vm.getState())) {
 				// The VM was not even running when the decision about its destruction was made
 				cloud.terminateVM(vm, true);
@@ -218,10 +254,16 @@ public class VirtualInfrastructure extends Timed {
 		while (kinds.hasNext()) {
 			String kind = kinds.next();
 			ArrayList<VirtualMachine> vmset = vmSetPerKind.get(kind);
-			if (vmset.size() == 1) {
-				VirtualMachine onlyMachine = vmset.get(0);
-				// We will not destroy the last VM from any kind
+			// Determining if we need a brand new kind of VM:
+			if (vmset.isEmpty()) {
+				// No VM with this kind yet, we need at least one for each so let's create one
+				requestVM(kind);
+				continue;
+			} else if (vmset.size() == 1) {
+				final VirtualMachine onlyMachine = vmset.get(0);
+				// We will try to not destroy the last VM from any kind
 				if (onlyMachine.underProcessing.isEmpty() && onlyMachine.toBeAdded.isEmpty()) {
+					// It has no ongoing computation
 					Integer i = unnecessaryHits.get(onlyMachine);
 					if (i == null) {
 						unnecessaryHits.put(onlyMachine, 1);
@@ -233,35 +275,46 @@ public class VirtualInfrastructure extends Timed {
 							// After an hour of disuse, we just drop the VM
 							unnecessaryHits.remove(onlyMachine);
 							destroyVM(onlyMachine);
+							// Last use of the VA, make it obsolete now => enable it to be removed from the
+							// central storage
+							obsoleteVAs.add(kind);
 							kinds.remove();
-							continue;
 						}
 					}
-				} else {
-					unnecessaryHits.remove(onlyMachine);
+					// We don't need to check if we need more VMs as it has no computation
+					continue;
 				}
+				// The VM now does some stuff now so we make sure we don't try to remove it
+				// prematurely
+				unnecessaryHits.remove(onlyMachine);
+				// Now we allow the check if we need more VMs.
 			} else {
+				boolean destroyed = false;
 				for (int i = 0; i < vmset.size(); i++) {
-					VirtualMachine vm = vmset.get(i);
+					final VirtualMachine vm = vmset.get(i);
 					if (vm.underProcessing.isEmpty() && vm.toBeAdded.isEmpty()) {
 						// The VM has no task on it at the moment, good candidate
 						if (vmmonitors.get(vm).getHourlyUtilisationPerc() < minUtilisationLevelBeforeDestruction) {
 							// The VM's load was under 20% in the past hour, we might be able to get rid of
 							// it
 							destroyVM(vm);
+							destroyed = true;
 							i--;
 						}
 					}
 				}
+				if (destroyed) {
+					// No need to check the average workload now, as we just destroyed a VM..
+					continue;
+				}
 			}
 
-			// Determining if we need a new VM:
-			if (vmset.isEmpty()) {
-				// No VM with this kind yet, we need at least one for each so let's create one
-				requestVM(kind);
+			// We will not make new VM request decisions on this kind of VM before the
+			// previous VM request of ours comes alive
+			if (underPrepVMPerKind.containsKey(kind))
 				continue;
-			}
-			// We need to check if we need more than one VM
+
+			// We need to check if we need more VMs than we have at the moment
 			double subHourUtilSum = 0;
 			for (VirtualMachine vm : vmset) {
 				subHourUtilSum += vmmonitors.get(vm).getHourlyUtilisationPerc();
@@ -298,4 +351,17 @@ public class VirtualInfrastructure extends Timed {
 		System.out.println("Autoscaling mechanism terminated.");
 	}
 
+	/**
+	 * If a VM starts to run, we should enable further VMs to start or destruct
+	 */
+	@Override
+	public void stateChanged(final VirtualMachine vm, final State oldState, final State newState) {
+		if (VirtualMachine.State.RUNNING.equals(newState)) {
+			underPrepVMPerKind.remove(vm.getVa().id);
+			vm.unsubscribeStateChange(this);
+		} else if (VirtualMachine.State.NONSERVABLE.equals(newState)) {
+			underPrepVMPerKind.remove(vm.getVa().id);
+			vm.unsubscribeStateChange(this);
+		}
+	}
 }

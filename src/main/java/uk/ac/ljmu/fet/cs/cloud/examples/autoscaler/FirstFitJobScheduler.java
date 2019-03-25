@@ -76,9 +76,11 @@ public class FirstFitJobScheduler implements JobLauncher, ConsumptionEvent {
 	@Override
 	public boolean launchAJob(final Job j) {
 		try {
-			ArrayList<VirtualMachine> vmset = vi.vmSetPerKind.get(j.executable);
+			final ArrayList<VirtualMachine> vmset = vi.vmSetPerKind.get(j.executable);
 			if (vmset != null) {
-				for (VirtualMachine vm : vmset) {
+				final int vmsetsize = vmset.size();
+				for (int i = 0; i < vmsetsize; i++) {
+					final VirtualMachine vm = vmset.get(i);
 					if (VirtualMachine.State.RUNNING.equals(vm.getState()) && vm.underProcessing.isEmpty()
 							&& vm.toBeAdded.isEmpty()) {
 						// VM has the executable and does not do a thing, ready to accept the job

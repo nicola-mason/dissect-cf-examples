@@ -48,7 +48,7 @@ public class HourlyVMMonitor extends Timed implements VirtualMachine.StateChange
 	 * The utilisation records of the past hour. This array is overwritten in a
 	 * circular fashion. For details see {@link HourlyVMMonitor#currIndex}
 	 */
-	private double[] utilisations = new double[12];
+	private final double[] utilisations = new double[12];
 	/**
 	 * The maximum utilisation possible in a given hour, note that this value is
 	 * determined only once the VM is running as the VM might not even have any
@@ -61,6 +61,11 @@ public class HourlyVMMonitor extends Timed implements VirtualMachine.StateChange
 	 * value is used to actually address the utilisations array.
 	 */
 	private int currIndex;
+
+	/**
+	 * If one called to finish the monitoring, this turns true.
+	 */
+	private boolean finished = false;
 
 	/**
 	 * Prepares the monitoring of a particular VM
@@ -78,9 +83,9 @@ public class HourlyVMMonitor extends Timed implements VirtualMachine.StateChange
 	 */
 	public void startMon() {
 		if (subscribe(5 * 60 * 1000)) {
-			double currUtil = toCheck.getTotalProcessed();
-			Arrays.fill(utilisations, currUtil);
+			Arrays.fill(utilisations, toCheck.getTotalProcessed());
 			currIndex = 0;
+			finished = false;
 		}
 	}
 
@@ -88,7 +93,7 @@ public class HourlyVMMonitor extends Timed implements VirtualMachine.StateChange
 	 * Cancels the monitoring of the VM.
 	 */
 	public void finishMon() {
-		unsubscribe();
+		finished = true;
 	}
 
 	/**
@@ -97,8 +102,12 @@ public class HourlyVMMonitor extends Timed implements VirtualMachine.StateChange
 	 */
 	@Override
 	public void tick(final long fires) {
-		utilisations[currIndex % utilisations.length] = toCheck.getTotalProcessed();
-		currIndex++;
+		if (finished) {
+			unsubscribe();
+		} else {
+			utilisations[currIndex % utilisations.length] = toCheck.getTotalProcessed();
+			currIndex++;
+		}
 	}
 
 	/**
@@ -123,9 +132,9 @@ public class HourlyVMMonitor extends Timed implements VirtualMachine.StateChange
 	 * running (and thus has a chance to do any activities)
 	 */
 	@Override
-	public void stateChanged(VirtualMachine vm, State oldState, State newState) {
+	public void stateChanged(final VirtualMachine vm, final State oldState, final State newState) {
 		if (VirtualMachine.State.RUNNING.equals(newState)) {
-			hourlyPossibleUtil = toCheck.getPerTickProcessingPower() * 3600 * 1000;
+			hourlyPossibleUtil = toCheck.getPerTickProcessingPower() * 3600000;
 			vm.unsubscribeStateChange(this);
 		}
 	}

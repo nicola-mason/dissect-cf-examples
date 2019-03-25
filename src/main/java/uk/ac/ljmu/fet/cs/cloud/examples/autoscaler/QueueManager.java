@@ -90,11 +90,10 @@ class QueueManager extends Timed {
 		final Iterator<String> kindIter = queued.keySet().iterator();
 		queueChangeLoop: while (kindIter.hasNext()) {
 			// The queue for a specific kind of executable
-			ArrayDeque<Job> q = queued.get(kindIter.next());
+			final ArrayDeque<Job> q = queued.get(kindIter.next());
 			do {
-				// The current head of the queue
-				Job curr = q.peekFirst();
-				if (launcher.launchAJob(curr)) {
+				// Launch the current head of the queue
+				if (launcher.launchAJob(q.peekFirst())) {
 					// Launch was not successful, no point trying further jobs in the queue
 					continue queueChangeLoop;
 				} else {

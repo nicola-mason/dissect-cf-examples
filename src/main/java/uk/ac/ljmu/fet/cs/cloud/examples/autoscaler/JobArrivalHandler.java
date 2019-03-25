@@ -43,6 +43,7 @@ public class JobArrivalHandler extends Timed {
 	 * All jobs to be handled
 	 */
 	private final List<Job> jobs;
+	private final int totaljobcount;
 	/**
 	 * The job scheduler to be used
 	 */
@@ -90,7 +91,8 @@ public class JobArrivalHandler extends Timed {
 		Timed.skipEventsTill(minsubmittime * 1000);
 		this.launcher = launcher;
 		this.qm = qm;
-		pr.setTotalJobCount(jobs.size());
+		totaljobcount = jobs.size();
+		pr.setTotalJobCount(totaljobcount);
 	}
 
 	/**
@@ -106,9 +108,9 @@ public class JobArrivalHandler extends Timed {
 	 */
 	@Override
 	public void tick(long currTime) {
-		for (int i = currIndex; i < jobs.size(); i++) {
+		for (int i = currIndex; i < totaljobcount; i++) {
 			final Job toprocess = jobs.get(i);
-			long submittime = toprocess.getSubmittimeSecs() * 1000;
+			final long submittime = toprocess.getSubmittimeSecs() * 1000;
 			if (currTime == submittime) {
 				// Job is due
 				if (launcher.launchAJob(toprocess)) {
@@ -119,10 +121,10 @@ public class JobArrivalHandler extends Timed {
 			} else if (currTime < submittime) {
 				// Nothing to do now, let's wait till the next job is due
 				updateFrequency(submittime - currTime);
-				break;
+				return;
 			}
 		}
-		if (currIndex == jobs.size()) {
+		if (currIndex == totaljobcount) {
 			// No further jobs, so no further dispatching
 			System.out.println("Last job arrived, dispatching mechanism is terminated.");
 			unsubscribe();
@@ -138,8 +140,8 @@ public class JobArrivalHandler extends Timed {
 	 */
 	public double getAverageQueueTime() {
 		double totqt = 0;
-		for (Job j : jobs) {
-			totqt += j.getRealqueueTime();
+		for (int i = 0; i < totaljobcount; i++) {
+			totqt += jobs.get(i).getRealqueueTime();
 		}
 		return totqt / jobs.size();
 	}
