@@ -149,10 +149,8 @@ public class MultiIaaSJobDispatcher extends Timed {
 	 * all of them having the same amount of PMs and all of their PMs are
 	 * constructed with the same amount of resources)
 	 * 
-	 * @param producer
-	 *            the trace
-	 * @param target
-	 *            the iaas systems to be used for submitting the trace to
+	 * @param producer the trace
+	 * @param target   the iaas systems to be used for submitting the trace to
 	 */
 	public MultiIaaSJobDispatcher(GenericTraceProducer producer, List<IaaSService> target)
 			throws TraceManagementException {
@@ -365,14 +363,18 @@ public class MultiIaaSJobDispatcher extends Timed {
 							// check if the job was not servable because it would
 							// have needed more resources than the target clouds
 							// could offer in total.
-							servability &= vms[j].isServable();
+							if (vms[j] == null) {
+								servability = false;
+							} else {
+								servability &= vms[j].isServable();
+							}
 						}
 						if (servability) {
 							retry = false;
 							new SingleJobRunner(toprocess, vms, this);
 						} else {
 							for (int j = 0; j < vms.length; j++) {
-								if (vms[j].isServable()) {
+								if (vms[j] != null && vms[j].isServable()) {
 									vms[j].prematureDestroy();
 								}
 							}
@@ -435,8 +437,7 @@ public class MultiIaaSJobDispatcher extends Timed {
 	 * Allows single job runners to let us know if they have completed the execution
 	 * of their job
 	 * 
-	 * @param finishedVMs
-	 *            the number of VMs that were actually used for the job
+	 * @param finishedVMs the number of VMs that were actually used for the job
 	 */
 	void increaseDestroyCounter(final int finishedVMs) {
 		if (finishedVMs <= 0) {
@@ -449,10 +450,9 @@ public class MultiIaaSJobDispatcher extends Timed {
 	 * Sets the processing power related requirements for the resource allocation
 	 * requests for all VMs.
 	 * 
-	 * @param usableProcPower
-	 *            the CPU's processing power instructions/ms
-	 * @param minimum
-	 *            is it the minimum required or the total you want to specify
+	 * @param usableProcPower the CPU's processing power instructions/ms
+	 * @param minimum         is it the minimum required or the total you want to
+	 *                        specify
 	 */
 	public void setUsableProcPower(final double usableProcPower, final boolean minimum) {
 		this.useThisProcPower = usableProcPower;
