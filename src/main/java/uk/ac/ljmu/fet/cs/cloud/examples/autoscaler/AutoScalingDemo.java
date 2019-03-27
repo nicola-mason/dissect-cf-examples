@@ -109,7 +109,8 @@ public class AutoScalingDemo implements TraceExhaustionCallback {
 	 * @throws Exception If the trace cannot be loaded, or if there are some
 	 *                   configuration issue.
 	 */
-	public AutoScalingDemo(int cores, int nodes, String traceFileLoc) throws Exception {
+	public AutoScalingDemo(int cores, int nodes, String traceFileLoc, Class<? extends VirtualInfrastructure> viclass)
+			throws Exception {
 		if (cores < 4)
 			throw new InvalidParameterException("Per PM core count cannot be lower than 4");
 		// Prepares the datacentre
@@ -119,7 +120,8 @@ public class AutoScalingDemo implements TraceExhaustionCallback {
 		// Set up our energy meter for the whole cloud
 		energymeter = new IaaSEnergyMeter(cloud);
 		// Initialise the virtual infrastructue of ours on the cloud
-		vi = new VirtualInfrastructure(cloud);
+		System.err.println("Using the auto scaler: " + viclass.getName());
+		vi = viclass.getConstructor(IaaSService.class).newInstance(cloud);
 		vi.startAutoScaling();
 
 		// Simple job dispatching mechanism which first prepares the workload
@@ -172,10 +174,20 @@ public class AutoScalingDemo implements TraceExhaustionCallback {
 	 * Sets up and starts the simulation of an auto-scaled virtual infrastructure
 	 * for a particular job trace.
 	 * 
-	 * @param args
+	 * list of CLI arguments:
+	 * <ol>
+	 * <li>The trace file</li>
+	 * <li>The number of CPU cores a single machine in the cloud should have</li>
+	 * <li>The number of physical machines the cloud should have</li>
+	 * <li>The auto scaler mechanism to be used in conjunction with the virtual
+	 * infrastructure that will run the jobs from the trace</li>
+	 * </ol>
+	 * 
+	 * @param args the CLI arguments
 	 * @throws Exception On any issue this application terminates with a stack trace
 	 */
 	public static void main(String[] args) throws Exception {
-		new AutoScalingDemo(Integer.parseInt(args[1]), Integer.parseInt(args[2]), args[0]).simulateAndprintStatistics();
+		new AutoScalingDemo(Integer.parseInt(args[1]), Integer.parseInt(args[2]), args[0],
+				(Class<? extends VirtualInfrastructure>) Class.forName(args[3])).simulateAndprintStatistics();
 	}
 }
