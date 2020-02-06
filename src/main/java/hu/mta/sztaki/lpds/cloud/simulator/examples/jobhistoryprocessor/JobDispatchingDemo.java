@@ -249,6 +249,7 @@ public class JobDispatchingDemo {
 			trgen.setMinNodeProcs(Integer.parseInt(params[6]));
 			trgen.setMaxNodeprocs(Integer.parseInt(params[7]));
 			trgen.setMaxTotalProcs(Integer.parseInt(params[8]));
+			args[0]="Synthetic-RRTG";
 		}
 
 		if (filterSpec != null) {
